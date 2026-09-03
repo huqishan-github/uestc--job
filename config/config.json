@@ -1,0 +1,13 @@
+{
+  "timezone": "Asia/Shanghai",
+  "recent_days": 14,
+  "onsite_forward_days": 30,
+  "request_timeout": 20,
+  "request_interval_seconds": 1.5,
+  "max_retries": 3,
+  "list_page_size": 50,
+  "max_list_pages": 8,
+  "max_existing_rechecks_per_source": 80,
+  "detail_workers": 4,
+  "base_url": "https://jiuye.uestc.edu.cn/career/"
+}
