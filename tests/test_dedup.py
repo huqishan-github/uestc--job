@@ -142,6 +142,25 @@ def test_explicit_table_jobs_are_split_with_row_specific_requirements() -> None:
     assert positions[1].major == "力学"
 
 
+def test_announcement_headline_is_not_used_as_a_job_name() -> None:
+    detail = {
+        "title": "年轻“九”就要不一“阳”，锁定宣讲会等你来看！",
+        "recruitmentContent": "<p>2027届秋季校园招聘</p>",
+    }
+    assert [position.name for position in extract_positions(detail)] == ["未明确列出"]
+
+
+def test_role_like_api_title_can_still_supply_explicit_jobs() -> None:
+    detail = {
+        "title": "机械设计工程师、结构设计工程师",
+        "recruitmentContent": "<p>招聘详情请见公告。</p>",
+    }
+    assert [position.name for position in extract_positions(detail)] == [
+        "机械设计工程师",
+        "结构设计工程师",
+    ]
+
+
 def test_plain_text_application_url_stops_before_chinese_description() -> None:
     content = "<p>简历投递</p><p>登录招聘网站：</p><p>http://career.example.com，线上投递简历</p>"
     method, url = extract_submission({}, content)

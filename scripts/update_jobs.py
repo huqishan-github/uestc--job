@@ -964,7 +964,17 @@ def extract_positions(detail: Mapping[str, Any]) -> list[Position]:
     api_title = normalize_text(detail.get("title"))
     if api_title:
         api_positions = [Position(name=name) for name in split_job_names(api_title)]
-        if api_positions:
+        explicitly_labeled = bool(
+            re.match(r"^(?:招聘)?(?:岗位|职位)(?:名称)?\s*[：:]", api_title)
+        )
+        # The API's ``title`` field is also used for announcement headlines.  Only
+        # treat it as a position when it is explicitly labelled or every parsed
+        # item has a role-like ending; otherwise slogans and event names become
+        # fabricated jobs (for example an online-presentation headline).
+        all_role_like = bool(api_positions) and all(
+            _ends_like_role(position.name) for position in api_positions
+        )
+        if api_positions and (explicitly_labeled or all_role_like):
             return deduplicate_positions(api_positions)
     del content  # Explicitly leave the field blank when no reliable position was found.
     return [Position(name="未明确列出")]
