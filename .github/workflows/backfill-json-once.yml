@@ -1,0 +1,59 @@
+name: Backfill daily JSON once
+
+on:
+  push:
+    paths:
+      - ".github/workflows/backfill-json-once.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Rerun recruitment monitor
+        id: monitor
+        continue-on-error: true
+        run: python scripts/update_jobs.py
+
+      - name: Backfill structured JSON reports
+        run: python scripts/backfill_daily_json.py --start 2026-09-03 --end 2026-09-09
+
+      - name: Commit generated data
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data reports
+          if git diff --cached --quiet; then
+            echo "No generated changes to commit."
+          else
+            git commit -m "Backfill structured UESTC job reports"
+            git push
+          fi
+
+      - name: Report live-rerun status
+        if: always()
+        shell: bash
+        run: |
+          if [ "${{ steps.monitor.outcome }}" = "success" ]; then
+            echo "Live recruitment monitor rerun succeeded."
+          else
+            echo "::warning::Live rerun failed in GitHub Actions; JSON backfill still used the existing authoritative data/jobs.csv."
+          fi
