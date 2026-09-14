@@ -1,0 +1,87 @@
+name: Daily UESTC job update
+
+on:
+  schedule:
+    # 04:00 UTC = 12:00 Asia/Shanghai
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: uestc-daily-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout latest main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Confirm required project state
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f AGENTS.md
+          test -f config/config.json
+          test -f data/jobs.csv
+          test -f data/UESTC招聘信息.xlsx
+          test -f scripts/update_jobs.py
+          echo "Starting from main=$(git rev-parse HEAD)"
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Run guarded recruitment update
+        run: python scripts/update_jobs.py
+
+      - name: Review generated changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git status --short
+          git diff --stat -- data reports
+          if git diff --name-only | grep -E '^\.github/workflows/' ; then
+            echo "Unexpected workflow-file modification during data run" >&2
+            exit 1
+          fi
+
+      - name: Commit and push data only
+        shell: bash
+        env:
+          TZ: Asia/Shanghai
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Daily persistence is intentionally limited to generated data/report paths.
+          git add data reports
+          if git diff --cached --quiet; then
+            echo "No recruitment data changes to commit."
+            exit 0
+          fi
+
+          # Do not silently overwrite a newer remote main. A race must fail closed.
+          git fetch origin main
+          if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+            echo "Remote main changed during this run; refusing non-fast-forward persistence." >&2
+            exit 1
+          fi
+
+          git commit -m "Update UESTC jobs $(date +%F)"
+          git push origin HEAD:main
