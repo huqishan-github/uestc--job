@@ -7,7 +7,7 @@ import argparse
 import csv
 import json
 import logging
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -15,12 +15,12 @@ from openpyxl import load_workbook
 
 if __package__:
     from . import update_jobs_core as _core
-    from .export_daily_json import export_daily_json
-    from .update_jobs_core import *  # noqa: F401,F403 - preserve the historical module API
+    from .export_daily_json import export_daily_json, export_daily_markdown
+    from .update_jobs_core import *  # noqa: F401,F403
 else:
     import update_jobs_core as _core
-    from export_daily_json import export_daily_json
-    from update_jobs_core import *  # noqa: F401,F403 - preserve the historical module API
+    from export_daily_json import export_daily_json, export_daily_markdown
+    from update_jobs_core import *  # noqa: F401,F403
 
 
 def _config_path_from_argv() -> Path:
@@ -97,6 +97,13 @@ def _ensure_history_preserved(before_ids: list[str], after_ids: list[str]) -> No
         raise ValueError(f"运行后总记录数减少：{len(before_ids)} -> {len(after_ids)}")
 
 
+def _parse_config_date(value: object) -> date | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    return datetime.strptime(text, "%Y-%m-%d").date()
+
+
 def main() -> int:
     config_path = _config_path_from_argv()
 
@@ -118,26 +125,39 @@ def main() -> int:
         config = json.loads(config_path.read_text(encoding="utf-8"))
         timezone = ZoneInfo(str(config["timezone"]))
         now = datetime.now(timezone)
-        markdown_path = _core.REPORTS_DIR / f"{now.date().isoformat()}.md"
-        if not markdown_path.exists() or markdown_path.stat().st_size == 0:
-            raise ValueError(f"Markdown 日报不存在或为空：{markdown_path}")
+        target_date = now.date()
+        bootstrap_date = _parse_config_date(config.get("daily_report_bootstrap_date"))
+        forward_days = int(config.get("daily_report_forward_days", 30))
+        if forward_days < 1:
+            raise ValueError("daily_report_forward_days 必须大于 0")
 
         output_path = export_daily_json(
             _core.CSV_PATH,
             _core.REPORTS_DIR,
-            now.date(),
+            target_date,
             now.strftime("%Y-%m-%d %H:%M:%S"),
+            bootstrap_date=bootstrap_date,
+            forward_days=forward_days,
         )
         payload = json.loads(output_path.read_text(encoding="utf-8"))
-        if payload.get("date") != now.date().isoformat():
+        markdown_path = export_daily_markdown(payload, _core.REPORTS_DIR, target_date)
+
+        if payload.get("date") != target_date.isoformat():
             raise ValueError("JSON 日报日期与本次运行日期不一致")
         if not isinstance(payload.get("records"), list):
             raise ValueError("JSON 日报缺少 records 数组")
+        if not markdown_path.exists() or markdown_path.stat().st_size == 0:
+            raise ValueError(f"Markdown 日报不存在或为空：{markdown_path}")
+        expected_mode = "rolling_window_bootstrap" if target_date == bootstrap_date else "daily_increment"
+        if payload.get("report_mode") != expected_mode:
+            raise ValueError("日报模式与配置不一致")
     except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
         logging.error("运行后完整性校验失败；禁止将本次结果持久化到 GitHub：%s", exc)
         return 3
 
     print(f"运行后数据完整性校验通过：历史 {len(baseline_ids)} 条全部保留，当前 {len(final_ids)} 条")
+    print(f"日报模式：{payload['report_mode']}；扫描窗口：{payload['window']['start']} ～ {payload['window']['end']}")
+    print(f"Markdown日报：{markdown_path.relative_to(_core.ROOT)}")
     print(f"JSON日报：{output_path.relative_to(_core.ROOT)}")
     return 0
 
