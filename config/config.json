@@ -1,7 +1,9 @@
 {
   "timezone": "Asia/Shanghai",
-  "recent_days": 14,
+  "recent_days": 30,
   "onsite_forward_days": 30,
+  "daily_report_forward_days": 30,
+  "daily_report_bootstrap_date": "2026-09-15",
   "request_timeout": 20,
   "request_interval_seconds": 1.5,
   "max_retries": 3,
