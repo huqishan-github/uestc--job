@@ -1,4 +1,4 @@
-name: Recover and update UESTC jobs 2026-09-14
+name: Backfill daily JSON once
 
 on:
   push:
@@ -9,14 +9,12 @@ permissions:
   contents: write
 
 jobs:
-  recover-update:
+  backfill:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
-      - name: Checkout current main
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -26,134 +24,36 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
 
-      - name: Read required project state
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "HEAD=$(git rev-parse HEAD)"
-          test -f scripts/update_jobs.py
-          cat AGENTS.md
-          cat config/config.json
-          python - <<'PY'
-          import csv
-          from pathlib import Path
-          from openpyxl import load_workbook
-
-          csv_path = Path('data/jobs.csv')
-          with csv_path.open('r', encoding='utf-8-sig', newline='') as f:
-              rows = list(csv.DictReader(f))
-          print(f'current_main_csv_rows={len(rows)}')
-          try:
-              wb = load_workbook('data/UESTC招聘信息.xlsx', read_only=True, data_only=True)
-              print(f'current_main_excel_sheets={wb.sheetnames}')
-              wb.close()
-          except Exception as exc:
-              print(f'current_main_excel_error={type(exc).__name__}: {exc}')
-          PY
-
-      - name: Restore healthy 3697-record baseline
-        shell: bash
-        run: |
-          set -euo pipefail
-          HEALTHY=ec253ad536c9d5c0b677a4d6b63b3624a8f47eb1
-          git cat-file -e "$HEALTHY^{commit}"
-          git show "$HEALTHY:data/jobs.csv" > data/jobs.csv
-          git show "$HEALTHY:data/UESTC招聘信息.xlsx" > data/UESTC招聘信息.xlsx
-          python - <<'PY'
-          import csv
-          from pathlib import Path
-          from openpyxl import load_workbook
-
-          with Path('data/jobs.csv').open('r', encoding='utf-8-sig', newline='') as f:
-              rows = list(csv.DictReader(f))
-          if len(rows) != 3697:
-              raise SystemExit(f'healthy CSV row count mismatch: {len(rows)} != 3697')
-          ids = [r.get('唯一ID','').strip() for r in rows]
-          if len(ids) != len(set(ids)) or not all(ids):
-              raise SystemExit('healthy CSV unique IDs invalid')
-          wb = load_workbook('data/UESTC招聘信息.xlsx', read_only=True, data_only=True)
-          print(f'healthy_excel_sheets={wb.sheetnames}')
-          wb.close()
-          print('healthy_baseline_csv_rows=3697')
-          PY
-
       - name: Run tests
         run: python -m pytest -q
 
-      - name: Run the only allowed monitor entrypoint
+      - name: Rerun recruitment monitor
+        id: monitor
+        continue-on-error: true
         run: python scripts/update_jobs.py
 
-      - name: Validate CSV Excel and daily reports
+      - name: Backfill structured JSON reports
+        run: python scripts/backfill_daily_json.py --start 2026-09-03 --end 2026-09-09
+
+      - name: Commit generated data
         shell: bash
         run: |
-          set -euo pipefail
-          python - <<'PY'
-          import csv, json
-          from pathlib import Path
-          from openpyxl import load_workbook
-
-          csv_path = Path('data/jobs.csv')
-          xlsx_path = Path('data/UESTC招聘信息.xlsx')
-          md_path = Path('reports/2026-09-14.md')
-          json_path = Path('reports/2026-09-14.json')
-
-          with csv_path.open('r', encoding='utf-8-sig', newline='') as f:
-              rows = list(csv.DictReader(f))
-          csv_ids = [r.get('唯一ID','').strip() for r in rows]
-          if not csv_ids or not all(csv_ids) or len(csv_ids) != len(set(csv_ids)):
-              raise SystemExit('CSV IDs are empty or duplicated')
-          if len(rows) < 3697:
-              raise SystemExit(f'history loss detected: {len(rows)} < 3697')
-
-          wb = load_workbook(xlsx_path, read_only=True, data_only=True)
-          excel_ids = []
-          matched_sheet = None
-          for ws in wb.worksheets:
-              first = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), ())
-              headers = [str(v).strip() if v is not None else '' for v in first]
-              if '唯一ID' in headers:
-                  idx = headers.index('唯一ID')
-                  matched_sheet = ws.title
-                  for row in ws.iter_rows(min_row=2, values_only=True):
-                      value = row[idx] if idx < len(row) else None
-                      if value is not None and str(value).strip():
-                          excel_ids.append(str(value).strip())
-                  break
-          wb.close()
-          if matched_sheet is None:
-              raise SystemExit('Excel has no sheet with 唯一ID header')
-          if len(excel_ids) != len(rows):
-              raise SystemExit(f'CSV/Excel count mismatch: {len(rows)} vs {len(excel_ids)}')
-          if set(excel_ids) != set(csv_ids):
-              raise SystemExit('CSV/Excel ID sets differ')
-          if not md_path.exists() or not json_path.exists():
-              raise SystemExit('2026-09-14 daily report files missing')
-          payload = json.loads(json_path.read_text(encoding='utf-8'))
-          print(f'final_csv_rows={len(rows)}')
-          print(f'final_excel_rows={len(excel_ids)} sheet={matched_sheet}')
-          print('daily_summary=' + json.dumps(payload.get('summary', {}), ensure_ascii=False, sort_keys=True))
-          statuses = {'verified': 0, 'unverified': 0, 'failed': 0}
-          for r in payload.get('records', []):
-              s = r.get('链接状态', '')
-              if s in statuses:
-                  statuses[s] += 1
-          print('daily_link_status=' + json.dumps(statuses, ensure_ascii=False, sort_keys=True))
-          PY
-          git diff --stat
-          git status --short
-
-      - name: Restore workflow and commit generated project data
-        shell: bash
-        run: |
-          set -euo pipefail
-          git show HEAD^:.github/workflows/backfill-json-once.yml > .github/workflows/backfill-json-once.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/jobs.csv data/UESTC招聘信息.xlsx reports/2026-09-14.md reports/2026-09-14.json .github/workflows/backfill-json-once.yml
-          git diff --cached --stat
+          git add data reports
           if git diff --cached --quiet; then
             echo "No generated changes to commit."
           else
-            git commit -m "Update UESTC jobs 2026-09-14"
-            git push origin HEAD:main
+            git commit -m "Backfill structured UESTC job reports"
+            git push
+          fi
+
+      - name: Report live-rerun status
+        if: always()
+        shell: bash
+        run: |
+          if [ "${{ steps.monitor.outcome }}" = "success" ]; then
+            echo "Live recruitment monitor rerun succeeded."
+          else
+            echo "::warning::Live rerun failed in GitHub Actions; JSON backfill still used the existing authoritative data/jobs.csv."
           fi
