@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
   "date": "2026-09-14",
-  "generated_at": "2026-09-14 13:27:16",
+  "generated_at": "2026-09-14 13:32:52",
   "source": "data/jobs.csv",
   "summary": {
-    "total": 191,
-    "new": 188,
+    "total": 192,
+    "new": 189,
     "updated": 3,
     "by_source": {
       "现场招聘": 122,
-      "需求信息": 69
+      "需求信息": 70
     }
   },
   "records": [
@@ -3233,6 +3233,32 @@
       "投递方式": "zhaopin_dghc@163.com/国聘搜索“东莞市海昌实业有限公司”投递",
       "投递链接": "",
       "详情链接": "https://jiuye.uestc.edu.cn/career/recruitment/online/fy6mjbrdiarl",
+      "链接状态": "verified",
+      "来源页面": "https://jiuye.uestc.edu.cn/career/recruitment/online",
+      "备注": ""
+    },
+    {
+      "变更类型": "新增",
+      "唯一ID": "c75744e74169ee6cf2cd49dfa7d390c93ba8398c61ab6d96a4efa127b1b2b7f9",
+      "首次获取时间": "2026-09-14 13:28:23",
+      "最后更新时间": "2026-09-14 13:28:23",
+      "信息类型": "需求信息",
+      "公司名称": "中国建设银行股份有限公司",
+      "招聘标题": "中国建设银行总部2027年度校园招聘公告",
+      "岗位": "未明确列出",
+      "发布时间": "2026-09-14 13:27:17",
+      "招聘日期": "2026-09-14",
+      "工作地点": "北京市:西城区",
+      "宣讲日期": "",
+      "宣讲开始时间": "",
+      "宣讲结束时间": "",
+      "宣讲地点": "",
+      "学历要求": "本科",
+      "专业要求": "",
+      "网申截止时间": "2026-10-08 00:00:00",
+      "投递方式": "",
+      "投递链接": "http://job.ccb.com/",
+      "详情链接": "https://jiuye.uestc.edu.cn/career/recruitment/online/fy75np6pe4n6",
       "链接状态": "verified",
       "来源页面": "https://jiuye.uestc.edu.cn/career/recruitment/online",
       "备注": ""
