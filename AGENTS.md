@@ -15,7 +15,12 @@ This repository is a long-running recruitment monitor for the public UESTC caree
 9. Never commit or print Secrets, tokens, cookies, passwords, credentials, or API keys.
 10. If push fails, preserve the local commit and clearly report that remote persistence failed.
 11. Do not destabilize working scraping logic merely for stylistic refactoring. Verify live site behavior first.
+12. The only allowed live-update entrypoint is `python scripts/update_jobs.py`; do not run or search for a root-level `fetch_jobs.py`.
+13. Treat a non-zero exit from `python scripts/update_jobs.py` as a hard stop: do not commit or push generated data.
+14. Before any data commit, verify that the post-run CSV contains every pre-run unique ID, the record count has not decreased, the Excel workbook opens successfully, and CSV/Excel unique-ID sets are identical.
+15. Daily data commits must stage only `data/` and `reports/`. Never include `.github/workflows/` in the same commit as a recruitment-data update.
+16. Never use force push for daily updates. Re-read the latest `main` before persisting and require a normal fast-forward.
 
 ## Safe maintenance workflow
 
-Check Git status and preserve unrelated user changes. Run `python -m pytest -q` before a live update, then run `python scripts/update_jobs.py`. Validate CSV/Excel counts and unique IDs, inspect the diff, and commit only relevant project paths when there is a real code or data change. Never use `git reset --hard`, force push, bypass login/verification, or increase request frequency aggressively.
+Check Git status and preserve unrelated user changes. Read `AGENTS.md`, `config/config.json`, `data/jobs.csv`, and the existing Excel workbook. Run `python -m pytest -q` before a live update, then run only `python scripts/update_jobs.py`. The update wrapper performs fail-closed pre-run and post-run integrity checks. If it exits non-zero, preserve the last healthy repository state and do not stage generated data. If it succeeds, independently validate CSV/Excel counts and unique IDs, inspect the diff, then stage only `data/` and `reports/` and commit only when there is a real data change. Never use `git reset --hard`, force push, bypass login/verification, or increase request frequency aggressively.
