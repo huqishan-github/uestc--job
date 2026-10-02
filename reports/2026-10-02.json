@@ -1,0 +1,19 @@
+{
+  "schema_version": 2,
+  "date": "2026-10-02",
+  "generated_at": "2026-10-02 18:25:44",
+  "source": "data/jobs.csv",
+  "report_mode": "daily_increment",
+  "window": {
+    "start": "2026-10-02",
+    "end": "2026-11-01",
+    "forward_days": 30
+  },
+  "summary": {
+    "total": 0,
+    "new": 0,
+    "updated": 0,
+    "by_source": {}
+  },
+  "records": []
+}
