@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "date": "2026-10-11",
-  "generated_at": "2026-10-11 08:45:46",
+  "generated_at": "2026-10-11 18:43:50",
   "source": "data/jobs.csv",
   "report_mode": "daily_increment",
   "window": {
