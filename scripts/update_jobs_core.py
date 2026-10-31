@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import tempfile
 import threading
 import time
@@ -1354,6 +1355,19 @@ def _temporary_path(target: Path, suffix: str) -> Path:
     return Path(name)
 
 
+def _fsync_file(path: Path) -> None:
+    with path.open("rb") as handle:
+        os.fsync(handle.fileno())
+
+
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def atomic_write_csv(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
     temporary = _temporary_path(path, ".tmp")
     try:
@@ -1373,6 +1387,10 @@ def atomic_write_csv(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
         if len(validated) != len(rows):
             raise DataFileError("CSV 临时文件记录数校验失败")
         os.replace(temporary, path)
+        _fsync_file(path)
+        _fsync_directory(path.parent)
+        if len(read_csv_history(path)) != len(rows):
+            raise DataFileError("CSV 目标文件记录数校验失败")
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -1462,12 +1480,91 @@ def atomic_write_excel(
     try:
         workbook.save(temporary)
         workbook.close()
+        _fsync_file(temporary)
         validated_rows, _ = read_excel_history(temporary)
         if len(validated_rows) != len(rows):
             raise DataFileError("Excel 临时文件记录数校验失败")
         os.replace(temporary, path)
+        _fsync_file(path)
+        _fsync_directory(path.parent)
+        validated_rows, _ = read_excel_history(path)
+        if len(validated_rows) != len(rows):
+            raise DataFileError("Excel 目标文件记录数校验失败")
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _backup_file(path: Path) -> Path | None:
+    if not path.exists():
+        return None
+    backup = _temporary_path(path, ".backup")
+    shutil.copy2(path, backup)
+    _fsync_file(backup)
+    return backup
+
+
+def _restore_file(path: Path, backup: Path | None) -> None:
+    if backup is None:
+        path.unlink(missing_ok=True)
+        return
+    os.replace(backup, path)
+    _fsync_file(path)
+
+
+def atomic_write_dataset(
+    csv_path: Path,
+    excel_path: Path,
+    rows: Sequence[Mapping[str, Any]],
+    prior_updates: Sequence[Sequence[str]],
+    events: Sequence[ChangeEvent],
+) -> None:
+    """Persist CSV and Excel as one rollback-protected dataset update."""
+
+    staged_csv = _temporary_path(csv_path, ".csv")
+    staged_excel = _temporary_path(excel_path, ".xlsx")
+    csv_backup: Path | None = None
+    excel_backup: Path | None = None
+    try:
+        atomic_write_csv(staged_csv, rows)
+        atomic_write_excel(staged_excel, rows, prior_updates, events)
+        validate_data_consistency(staged_csv, staged_excel, len(rows))
+
+        csv_backup = _backup_file(csv_path)
+        excel_backup = _backup_file(excel_path)
+        try:
+            os.replace(staged_csv, csv_path)
+            os.replace(staged_excel, excel_path)
+            _fsync_file(csv_path)
+            _fsync_file(excel_path)
+            _fsync_directory(csv_path.parent)
+            if excel_path.parent != csv_path.parent:
+                _fsync_directory(excel_path.parent)
+            validate_data_consistency(csv_path, excel_path, len(rows))
+        except Exception as exc:
+            rollback_errors: list[str] = []
+            for path, backup in ((csv_path, csv_backup), (excel_path, excel_backup)):
+                try:
+                    _restore_file(path, backup)
+                except Exception as rollback_exc:  # pragma: no cover - catastrophic filesystem failure
+                    rollback_errors.append(f"{path}: {rollback_exc}")
+            try:
+                _fsync_directory(csv_path.parent)
+                if excel_path.parent != csv_path.parent:
+                    _fsync_directory(excel_path.parent)
+            except Exception as rollback_exc:  # pragma: no cover - catastrophic filesystem failure
+                rollback_errors.append(f"目录同步: {rollback_exc}")
+            if rollback_errors:
+                raise DataFileError(
+                    f"数据集写入失败：{exc}；回滚失败：{'；'.join(rollback_errors)}"
+                ) from exc
+            raise DataFileError(f"数据集写入失败，已恢复原文件：{exc}") from exc
+    finally:
+        staged_csv.unlink(missing_ok=True)
+        staged_excel.unlink(missing_ok=True)
+        if csv_backup is not None:
+            csv_backup.unlink(missing_ok=True)
+        if excel_backup is not None:
+            excel_backup.unlink(missing_ok=True)
 
 
 def markdown_safe(value: Any) -> str:
@@ -1737,24 +1834,21 @@ def run(config_path: Path) -> int:
     data_changed = bool(merge.new_records or merge.updated_records)
     csv_written = False
     excel_written = False
-    if data_changed or not CSV_PATH.exists() or needs_repair:
-        atomic_write_csv(CSV_PATH, merge.rows)
+    if data_changed or not CSV_PATH.exists() or not EXCEL_PATH.exists() or needs_repair:
+        atomic_write_dataset(
+            CSV_PATH,
+            EXCEL_PATH,
+            merge.rows,
+            prior_updates,
+            merge.events,
+        )
         csv_written = True
-    if data_changed or not EXCEL_PATH.exists() or needs_repair:
-        atomic_write_excel(EXCEL_PATH, merge.rows, prior_updates, merge.events)
         excel_written = True
     report_path: Path | None = None
     if data_changed:
         report_path = REPORTS_DIR / f"{now.strftime('%Y-%m-%d')}.md"
         atomic_append_report(report_path, timestamp, merge.new_records, merge.updated_records)
 
-    # If only one store was absent, ensure both are available before validating.
-    if not CSV_PATH.exists():
-        atomic_write_csv(CSV_PATH, merge.rows)
-        csv_written = True
-    if not EXCEL_PATH.exists():
-        atomic_write_excel(EXCEL_PATH, merge.rows, prior_updates, merge.events)
-        excel_written = True
     validate_data_consistency(CSV_PATH, EXCEL_PATH, len(merge.rows))
     excel_count = len(read_excel_history(EXCEL_PATH)[0])
     print_summary(
